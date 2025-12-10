@@ -544,6 +544,7 @@ EOF
     
     cat > /tmp/xsoar-policy.hcl << 'POLICY'
 path "credentials/*" { capabilities = ["read", "list"] }
+path "sys/mounts" { capabilities = ["read"] }
 path "auth/token/renew-self" { capabilities = ["update"] }
 path "auth/token/lookup-self" { capabilities = ["read"] }
 POLICY
@@ -551,6 +552,7 @@ POLICY
     
     cat > /tmp/xsoar-rotate-policy.hcl << 'POLICY'
 path "credentials/*" { capabilities = ["create", "read", "update", "list", "delete"] }
+path "sys/mounts" { capabilities = ["read"] }
 path "auth/token/renew-self" { capabilities = ["update"] }
 path "auth/token/lookup-self" { capabilities = ["read"] }
 POLICY

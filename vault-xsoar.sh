@@ -176,44 +176,13 @@ load_credentials_from_file() {
 create_demo_credentials() {
     log_step "Creating demo credentials..."
 
-    local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
     vault kv put ${CREDENTIALS_PATH}/svc_xsoar \
         username="svc_xsoar" \
-        password="DemoP@ssw0rd123!" \
-        domain="demo.local" \
-        description="XSOAR Service Account" \
-        last_rotated="${timestamp}" > /dev/null
+        password="DemoP@ssw0rd123!" > /dev/null
 
-    vault kv put ${CREDENTIALS_PATH}/admin_xsoar \
-        username="admin_xsoar" \
-        password="AdminP@ss456!" \
-        domain="demo.local" \
-        description="AD Admin Account" \
-        last_rotated="${timestamp}" > /dev/null
-
-    vault kv put ${CREDENTIALS_PATH}/threatintel_api \
-        api_key="TI-KEY-demo-12345-abcdef" \
-        api_secret="TI-SECRET-67890-ghijkl" \
-        endpoint="https://api.threatintel.demo/v1" \
-        description="Threat Intelligence API" \
-        last_rotated="${timestamp}" > /dev/null
-
-    vault kv put ${CREDENTIALS_PATH}/splunk_db \
-        username="splunk_user" \
-        password="SplunkP@ss789!" \
-        host="splunk.demo.local" \
-        port="8089" \
-        description="Splunk database connection" \
-        last_rotated="${timestamp}" > /dev/null
-
-    vault kv put ${CREDENTIALS_PATH}/smtp_notify \
-        username="xsoar-notify@demo.local" \
-        password="EmailP@ss321!" \
-        server="smtp.demo.local" \
-        port="587" \
-        description="SMTP notification account" \
-        last_rotated="${timestamp}" > /dev/null
+    vault kv put ${CREDENTIALS_PATH}/svc_engine \
+        username="svc_engine" \
+        password="EngineP@ss456!" > /dev/null
 
     log_success "Demo credentials created"
 }

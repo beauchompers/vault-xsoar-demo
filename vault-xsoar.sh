@@ -178,28 +178,28 @@ create_demo_credentials() {
 
     local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-    vault kv put ${CREDENTIALS_PATH}/active-directory/svc_xsoar \
+    vault kv put ${CREDENTIALS_PATH}/svc_xsoar \
         username="svc_xsoar" \
         password="DemoP@ssw0rd123!" \
         domain="demo.local" \
         description="XSOAR Service Account" \
         last_rotated="${timestamp}" > /dev/null
 
-    vault kv put ${CREDENTIALS_PATH}/active-directory/admin \
+    vault kv put ${CREDENTIALS_PATH}/admin_xsoar \
         username="admin_xsoar" \
         password="AdminP@ss456!" \
         domain="demo.local" \
         description="AD Admin Account" \
         last_rotated="${timestamp}" > /dev/null
 
-    vault kv put ${CREDENTIALS_PATH}/api-keys/threatintel \
+    vault kv put ${CREDENTIALS_PATH}/threatintel_api \
         api_key="TI-KEY-demo-12345-abcdef" \
         api_secret="TI-SECRET-67890-ghijkl" \
         endpoint="https://api.threatintel.demo/v1" \
         description="Threat Intelligence API" \
         last_rotated="${timestamp}" > /dev/null
 
-    vault kv put ${CREDENTIALS_PATH}/database/splunk \
+    vault kv put ${CREDENTIALS_PATH}/splunk_db \
         username="splunk_user" \
         password="SplunkP@ss789!" \
         host="splunk.demo.local" \
@@ -207,7 +207,7 @@ create_demo_credentials() {
         description="Splunk database connection" \
         last_rotated="${timestamp}" > /dev/null
 
-    vault kv put ${CREDENTIALS_PATH}/email/smtp \
+    vault kv put ${CREDENTIALS_PATH}/smtp_notify \
         username="xsoar-notify@demo.local" \
         password="EmailP@ss321!" \
         server="smtp.demo.local" \
@@ -1263,24 +1263,9 @@ pause_for_key() {
 }
 
 get_all_credential_paths() {
-    local paths=("active-directory" "api-keys" "database" "email")
-
-    for base in "${paths[@]}"; do
-        local items=$(vault kv list -format=json ${CREDENTIALS_PATH}/${base} 2>/dev/null)
-        [[ -z "${items}" || "${items}" == "null" ]] && continue
-
-        echo "${items}" | jq -r '.[]' | while read -r item; do
-            if [[ "${item}" != */ ]]; then
-                echo "${base}/${item}"
-            else
-                local sub_items=$(vault kv list -format=json ${CREDENTIALS_PATH}/${base}/${item} 2>/dev/null)
-                [[ -z "${sub_items}" || "${sub_items}" == "null" ]] && continue
-                echo "${sub_items}" | jq -r '.[]' | while read -r sub; do
-                    [[ "${sub}" != */ ]] && echo "${base}/${item}${sub}"
-                done
-            fi
-        done
-    done
+    local items=$(vault kv list -format=json ${CREDENTIALS_PATH} 2>/dev/null)
+    [[ -z "${items}" || "${items}" == "null" ]] && return
+    echo "${items}" | jq -r '.[]' | grep -v '/$'
 }
 
 menu_main() {
@@ -1415,64 +1400,42 @@ interactive_browse() {
         return
     fi
 
-    local current_path=""
+    clear
+    show_mini_logo
+    echo ""
 
-    while true; do
-        clear
-        show_mini_logo
-        echo ""
+    local items=$(vault kv list -format=json ${CREDENTIALS_PATH} 2>/dev/null)
 
-        local full_path="${CREDENTIALS_PATH}/${current_path}"
-        local items=$(vault kv list -format=json ${full_path} 2>/dev/null)
+    if [[ -z "${items}" ]] || [[ "${items}" == "null" ]]; then
+        log_warn "No credentials found"
+        pause_for_key
+        return
+    fi
 
-        if [[ -z "${items}" ]] || [[ "${items}" == "null" ]]; then
-            log_warn "No items at this path"
-            pause_for_key
+    local menu_items=("🔙 Back to Menu")
+    while IFS= read -r item; do
+        [[ "${item}" != */ ]] && menu_items+=("🔑 ${item}")
+    done < <(echo "${items}" | jq -r '.[]')
+
+    echo -e "${WHITE}${BOLD}📂 Credentials${NC}"
+    echo ""
+
+    local selected=$(printf '%s\n' "${menu_items[@]}" | gum filter \
+        --header "Select credential (type to filter):" \
+        --header.foreground 51 \
+        --indicator.foreground 51 \
+        --match.foreground 214)
+
+    case "${selected}" in
+        "🔙 Back to Menu"|"")
             return
-        fi
-
-        local menu_items=()
-        if [[ -n "${current_path}" ]]; then
-            menu_items+=("⬆️  .. (Go Up)")
-        fi
-        menu_items+=("🔙 Back to Menu")
-
-        while IFS= read -r item; do
-            if [[ "${item}" == */ ]]; then
-                menu_items+=("📁 ${item}")
-            else
-                menu_items+=("🔑 ${item}")
-            fi
-        done < <(echo "${items}" | jq -r '.[]')
-
-        echo -e "${WHITE}${BOLD}📂 Browsing: ${CYAN}${full_path}/${NC}"
-        echo ""
-
-        local selected=$(printf '%s\n' "${menu_items[@]}" | gum filter \
-            --header "Select item (type to filter):" \
-            --header.foreground 51 \
-            --indicator.foreground 51 \
-            --match.foreground 214)
-
-        case "${selected}" in
-            "⬆️  .. (Go Up)")
-                current_path=$(dirname "${current_path}")
-                [[ "${current_path}" == "." ]] && current_path=""
-                ;;
-            "🔙 Back to Menu"|"")
-                return
-                ;;
-            "📁 "*)
-                local folder=${selected#"📁 "}
-                current_path="${current_path}${folder}"
-                ;;
-            "🔑 "*)
-                local cred=${selected#"🔑 "}
-                cmd_get "${current_path}${cred}"
-                pause_for_key
-                ;;
-        esac
-    done
+            ;;
+        "🔑 "*)
+            local cred=${selected#"🔑 "}
+            cmd_get "${cred}"
+            pause_for_key
+            ;;
+    esac
 }
 
 interactive_get() {
@@ -1538,33 +1501,12 @@ interactive_add() {
     echo -e "${WHITE}${BOLD}➕ Add New Credential${NC}"
     echo ""
 
-    local category=$(gum choose \
-        --header "Select category:" \
-        --header.foreground 51 \
-        --cursor.foreground 51 \
-        "active-directory" \
-        "api-keys" \
-        "database" \
-        "email" \
-        "custom")
-
-    [[ -z "${category}" ]] && return
-
-    if [[ "${category}" == "custom" ]]; then
-        category=$(gum input \
-            --header "Enter custom category:" \
-            --placeholder "e.g., cloud/aws")
-        [[ -z "${category}" ]] && return
-    fi
-
     local name=$(gum input \
         --header "Credential name:" \
-        --placeholder "e.g., svc_account")
+        --placeholder "e.g., svc_xsoar")
     [[ -z "${name}" ]] && return
 
-    local full_path="${category}/${name}"
-
-    if vault kv get ${CREDENTIALS_PATH}/${full_path} &>/dev/null; then
+    if vault kv get ${CREDENTIALS_PATH}/${name} &>/dev/null; then
         if ! gum confirm "Credential already exists. Overwrite?"; then
             return
         fi
@@ -1607,7 +1549,7 @@ interactive_add() {
         --border rounded \
         --border-foreground 51 \
         --padding "1 2" \
-        "Path: ${full_path}
+        "Name: ${name}
 Username: ${username}
 Password: [set]
 Description: ${description:-N/A}"
@@ -1617,14 +1559,14 @@ Description: ${description:-N/A}"
         local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
         gum spin --spinner dot --title "Creating credential..." -- \
-            vault kv put ${CREDENTIALS_PATH}/${full_path} \
+            vault kv put ${CREDENTIALS_PATH}/${name} \
                 username="${username}" \
                 password="${password}" \
                 description="${description}" \
                 created_at="${timestamp}" \
                 last_rotated="${timestamp}"
 
-        log_success "Credential created: ${full_path}"
+        log_success "Credential created: ${name}"
     else
         log_warn "Cancelled"
     fi

@@ -26,7 +26,7 @@ sudo CREDENTIALS_FILE=./my-credentials.json ./vault-xsoar.sh install
 
 # Or use CLI commands directly
 ./vault-xsoar.sh list
-./vault-xsoar.sh get active-directory/svc_xsoar
+./vault-xsoar.sh get svc_xsoar
 ```
 
 ## Installation
@@ -79,15 +79,14 @@ Menu structure:
 ./vault-xsoar.sh test                 # Run integration tests
 
 # Credential Management
-./vault-xsoar.sh list                 # List all credential categories
-./vault-xsoar.sh list active-directory # List credentials in category
-./vault-xsoar.sh get <path>           # Get credential details
-./vault-xsoar.sh get <path> json      # Get as JSON
-./vault-xsoar.sh add <path>           # Add credential (interactive)
-./vault-xsoar.sh add <path> <u> <p>   # Add credential with values
-./vault-xsoar.sh rotate <path>        # Rotate password
-./vault-xsoar.sh rotate <path> 24     # Rotate with 24-char password
-./vault-xsoar.sh delete <path>        # Delete credential
+./vault-xsoar.sh list                 # List all credentials
+./vault-xsoar.sh get <name>           # Get credential details
+./vault-xsoar.sh get <name> json      # Get as JSON
+./vault-xsoar.sh add <name>           # Add credential (interactive)
+./vault-xsoar.sh add <name> <u> <p>   # Add credential with values
+./vault-xsoar.sh rotate <name>        # Rotate password
+./vault-xsoar.sh rotate <name> 24     # Rotate with 24-char password
+./vault-xsoar.sh delete <name>        # Delete credential
 ./vault-xsoar.sh import <file>        # Import from JSON file
 
 # Info
@@ -104,7 +103,7 @@ Create a JSON file with your credentials:
 {
   "credentials": [
     {
-      "path": "active-directory/svc_account",
+      "path": "svc_account",
       "data": {
         "username": "svc_user",
         "password": "SecureP@ss123!",
@@ -113,7 +112,7 @@ Create a JSON file with your credentials:
       }
     },
     {
-      "path": "api-keys/my-api",
+      "path": "my_api",
       "data": {
         "api_key": "key-12345",
         "api_secret": "secret-67890",
@@ -162,19 +161,8 @@ View integration details:
 XSOAR commands:
 ```
 !hashicorp-list-secrets
-!hashicorp-get-secret path=active-directory/svc_xsoar
-!hashicorp-list-secrets path=active-directory
+!hashicorp-get-secret path=svc_xsoar
 ```
-
-## Credential Categories
-
-Default categories:
-- `active-directory/` - AD service accounts
-- `api-keys/` - API keys and secrets
-- `database/` - Database credentials
-- `email/` - SMTP and email accounts
-
-Custom categories can be created via the `add` command or JSON import.
 
 ## TLS Configuration
 

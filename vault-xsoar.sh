@@ -24,12 +24,14 @@ BOLD='\033[1m'
 
 # Configuration
 VAULT_VERSION="1.15.4"
-VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
+VAULT_ADDR="${VAULT_ADDR:-https://127.0.0.1:8200}"
 VAULT_CONFIG_DIR="/etc/vault.d"
 VAULT_DATA_DIR="/opt/vault/data"
 VAULT_LOG_DIR="/var/log/vault"
+VAULT_TLS_DIR="/etc/vault.d/tls"
 CREDENTIALS_PATH="credentials"
 CREDENTIALS_FILE="${CREDENTIALS_FILE:-}"  # Path to JSON file with initial credentials
+VAULT_TLS_ENABLED="${VAULT_TLS_ENABLED:-true}"  # Set to "false" to disable TLS
 
 #===============================================================================
 # ASCII Art Logo
@@ -216,6 +218,96 @@ create_demo_credentials() {
     log_success "Demo credentials created"
 }
 
+generate_tls_certificates() {
+    local hostname=${1:-$(hostname -f)}
+    local ip_addr=${2:-127.0.0.1}
+
+    log_step "Generating TLS certificates..."
+
+    mkdir -p ${VAULT_TLS_DIR}
+
+    # Generate CA private key
+    openssl genrsa -out ${VAULT_TLS_DIR}/ca.key 4096 2>/dev/null
+
+    # Generate CA certificate
+    openssl req -new -x509 -days 3650 -key ${VAULT_TLS_DIR}/ca.key \
+        -out ${VAULT_TLS_DIR}/ca.crt \
+        -subj "/C=US/ST=State/L=City/O=Vault/OU=XSOAR/CN=Vault CA" 2>/dev/null
+
+    # Generate server private key
+    openssl genrsa -out ${VAULT_TLS_DIR}/vault.key 4096 2>/dev/null
+
+    # Create server CSR config with SANs
+    cat > ${VAULT_TLS_DIR}/vault-csr.conf << CSRCONF
+[req]
+default_bits = 4096
+prompt = no
+default_md = sha256
+distinguished_name = dn
+req_extensions = req_ext
+
+[dn]
+C = US
+ST = State
+L = City
+O = Vault
+OU = XSOAR
+CN = ${hostname}
+
+[req_ext]
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = ${hostname}
+DNS.2 = localhost
+DNS.3 = vault
+DNS.4 = vault.local
+IP.1 = ${ip_addr}
+IP.2 = 127.0.0.1
+CSRCONF
+
+    # Generate server CSR
+    openssl req -new -key ${VAULT_TLS_DIR}/vault.key \
+        -out ${VAULT_TLS_DIR}/vault.csr \
+        -config ${VAULT_TLS_DIR}/vault-csr.conf 2>/dev/null
+
+    # Create extensions config for signing
+    cat > ${VAULT_TLS_DIR}/vault-ext.conf << EXTCONF
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = ${hostname}
+DNS.2 = localhost
+DNS.3 = vault
+DNS.4 = vault.local
+IP.1 = ${ip_addr}
+IP.2 = 127.0.0.1
+EXTCONF
+
+    # Sign server certificate with CA
+    openssl x509 -req -in ${VAULT_TLS_DIR}/vault.csr \
+        -CA ${VAULT_TLS_DIR}/ca.crt -CAkey ${VAULT_TLS_DIR}/ca.key \
+        -CAcreateserial -out ${VAULT_TLS_DIR}/vault.crt \
+        -days 365 -extfile ${VAULT_TLS_DIR}/vault-ext.conf 2>/dev/null
+
+    # Set permissions
+    chown -R vault:vault ${VAULT_TLS_DIR}
+    chmod 600 ${VAULT_TLS_DIR}/*.key
+    chmod 644 ${VAULT_TLS_DIR}/*.crt
+
+    # Copy CA cert to system trust store (Ubuntu)
+    cp ${VAULT_TLS_DIR}/ca.crt /usr/local/share/ca-certificates/vault-ca.crt
+    update-ca-certificates > /dev/null 2>&1
+
+    log_success "TLS certificates generated"
+    log_info "  CA cert: ${VAULT_TLS_DIR}/ca.crt"
+    log_info "  Server cert: ${VAULT_TLS_DIR}/vault.crt"
+}
+
 #===============================================================================
 # Gum Detection and Installation (for interactive menus)
 #===============================================================================
@@ -317,25 +409,52 @@ cmd_install() {
     mkdir -p ${VAULT_CONFIG_DIR} ${VAULT_DATA_DIR} ${VAULT_LOG_DIR}
     id -u vault &>/dev/null || useradd --system --home ${VAULT_CONFIG_DIR} --shell /bin/false vault
     chown -R vault:vault ${VAULT_DATA_DIR} ${VAULT_LOG_DIR}
-    
-    cat > ${VAULT_CONFIG_DIR}/vault.hcl << 'VAULTCONF'
-# Vault Server Configuration - XSOAR Demo
+
+    # Generate TLS certificates if enabled
+    if [[ "${VAULT_TLS_ENABLED}" == "true" ]]; then
+        generate_tls_certificates
+
+        cat > ${VAULT_CONFIG_DIR}/vault.hcl << VAULTCONF
+# Vault Server Configuration - XSOAR (TLS Enabled)
 listener "tcp" {
   address       = "0.0.0.0:8200"
-  tls_disable   = true  # Enable TLS in production!
+  tls_cert_file = "${VAULT_TLS_DIR}/vault.crt"
+  tls_key_file  = "${VAULT_TLS_DIR}/vault.key"
 }
 
 storage "file" {
-  path = "/opt/vault/data"
+  path = "${VAULT_DATA_DIR}"
 }
 
-api_addr     = "http://0.0.0.0:8200"
-cluster_addr = "https://0.0.0.0:8201"
+api_addr     = "https://127.0.0.1:8200"
+cluster_addr = "https://127.0.0.1:8201"
 ui           = true
 log_level    = "info"
-log_file     = "/var/log/vault/vault.log"
+log_file     = "${VAULT_LOG_DIR}/vault.log"
 disable_mlock = true
 VAULTCONF
+        export VAULT_ADDR="https://127.0.0.1:8200"
+    else
+        cat > ${VAULT_CONFIG_DIR}/vault.hcl << VAULTCONF
+# Vault Server Configuration - XSOAR (TLS Disabled - NOT FOR PRODUCTION)
+listener "tcp" {
+  address       = "0.0.0.0:8200"
+  tls_disable   = true
+}
+
+storage "file" {
+  path = "${VAULT_DATA_DIR}"
+}
+
+api_addr     = "http://127.0.0.1:8200"
+cluster_addr = "https://127.0.0.1:8201"
+ui           = true
+log_level    = "info"
+log_file     = "${VAULT_LOG_DIR}/vault.log"
+disable_mlock = true
+VAULTCONF
+        export VAULT_ADDR="http://127.0.0.1:8200"
+    fi
 
     # Systemd service
     cat > /etc/systemd/system/vault.service << 'SYSTEMD'
@@ -380,31 +499,29 @@ SYSTEMD
     systemctl start vault
     sleep 3
     log_success "Vault service started"
-    
-    export VAULT_ADDR="http://127.0.0.1:8200"
-    
+
     if vault status 2>/dev/null | grep -q "Initialized.*true"; then
         log_warn "Vault already initialized"
     else
         log_step "Initializing Vault..."
         INIT_OUTPUT=$(vault operator init -key-shares=1 -key-threshold=1 -format=json)
-        
+
         UNSEAL_KEY=$(echo "${INIT_OUTPUT}" | jq -r '.unseal_keys_b64[0]')
         ROOT_TOKEN=$(echo "${INIT_OUTPUT}" | jq -r '.root_token')
-        
+
         echo "${INIT_OUTPUT}" > /root/vault-init-keys.json
         chmod 600 /root/vault-init-keys.json
-        
+
         cat > /root/vault-env.sh << EOF
-export VAULT_ADDR="http://127.0.0.1:8200"
+export VAULT_ADDR="${VAULT_ADDR}"
 export VAULT_TOKEN="${ROOT_TOKEN}"
 export VAULT_UNSEAL_KEY="${UNSEAL_KEY}"
 EOF
         chmod 600 /root/vault-env.sh
-        
+
         vault operator unseal "${UNSEAL_KEY}" > /dev/null
         log_success "Vault initialized and unsealed"
-        
+
         export VAULT_TOKEN="${ROOT_TOKEN}"
     fi
     
@@ -484,6 +601,12 @@ EOF
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════════════════════${NC}"
     echo ""
     echo -e "${WHITE}Vault UI:${NC}          ${CYAN}${VAULT_ADDR}/ui${NC}"
+    if [[ "${VAULT_TLS_ENABLED}" == "true" ]]; then
+        echo -e "${WHITE}TLS:${NC}               ${GREEN}Enabled${NC}"
+        echo -e "${WHITE}CA Certificate:${NC}    ${GRAY}${VAULT_TLS_DIR}/ca.crt${NC}"
+    else
+        echo -e "${WHITE}TLS:${NC}               ${YELLOW}Disabled (not recommended for production)${NC}"
+    fi
     echo ""
     echo -e "${WHITE}Root Token:${NC}        ${YELLOW}${ROOT_TOKEN}${NC}"
     echo -e "${WHITE}Unseal Key:${NC}        ${YELLOW}${UNSEAL_KEY}${NC}"
@@ -493,6 +616,13 @@ EOF
     echo ""
     echo -e "${GRAY}Tokens saved to: /root/xsoar-tokens.txt${NC}"
     echo -e "${GRAY}Environment:      source /root/vault-env.sh${NC}"
+    if [[ "${VAULT_TLS_ENABLED}" == "true" ]]; then
+        echo ""
+        echo -e "${WHITE}${BOLD}TLS Notes:${NC}"
+        echo -e "  ${GRAY}• CA cert added to system trust store${NC}"
+        echo -e "  ${GRAY}• For XSOAR: Import ${VAULT_TLS_DIR}/ca.crt as trusted CA${NC}"
+        echo -e "  ${GRAY}• Or set 'Verify SSL' to false in XSOAR integration${NC}"
+    fi
     echo ""
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════════════════════${NC}"
     echo -e "${WHITE}Quick Commands:${NC}"
@@ -1007,11 +1137,14 @@ cmd_help() {
     echo ""
 
     echo -e "${WHITE}${BOLD}EXAMPLES${NC}"
-    echo -e "  ${GRAY}# Install Vault with custom credentials${NC}"
-    echo -e "  sudo CREDENTIALS_FILE=./my-creds.json $SCRIPT_NAME install"
-    echo ""
-    echo -e "  ${GRAY}# Install Vault with demo credentials${NC}"
+    echo -e "  ${GRAY}# Install Vault with TLS (default)${NC}"
     echo -e "  sudo $SCRIPT_NAME install"
+    echo ""
+    echo -e "  ${GRAY}# Install Vault without TLS (not recommended)${NC}"
+    echo -e "  sudo VAULT_TLS_ENABLED=false $SCRIPT_NAME install"
+    echo ""
+    echo -e "  ${GRAY}# Install with custom credentials${NC}"
+    echo -e "  sudo CREDENTIALS_FILE=./my-creds.json $SCRIPT_NAME install"
     echo ""
     echo -e "  ${GRAY}# List all credentials${NC}"
     echo -e "  $SCRIPT_NAME list"
@@ -1039,8 +1172,9 @@ cmd_help() {
     echo ""
 
     echo -e "${WHITE}${BOLD}ENVIRONMENT VARIABLES${NC}"
-    echo -e "  ${CYAN}VAULT_ADDR${NC}           Vault server address"
+    echo -e "  ${CYAN}VAULT_ADDR${NC}           Vault server address (default: https://127.0.0.1:8200)"
     echo -e "  ${CYAN}VAULT_TOKEN${NC}          Authentication token"
+    echo -e "  ${CYAN}VAULT_TLS_ENABLED${NC}    Enable TLS (default: true)"
     echo -e "  ${CYAN}CREDENTIALS_FILE${NC}     Path to JSON file for initial credentials (install)"
     echo ""
 }

@@ -5,6 +5,7 @@ An all-in-one tool for installing, configuring, and managing HashiCorp Vault int
 ## Features
 
 - **One-command Vault installation** on Ubuntu 24.04 LTS
+- **TLS enabled by default** with auto-generated certificates
 - **Interactive TUI menu** using [gum](https://github.com/charmbracelet/gum) for arrow-key navigation
 - **Credential management**: list, get, add, rotate, delete
 - **Bulk import** credentials from JSON files
@@ -47,9 +48,10 @@ sudo ./vault-xsoar.sh install
 ```
 
 After installation:
-- Vault UI: http://127.0.0.1:8200/ui
+- Vault UI: https://127.0.0.1:8200/ui (TLS enabled by default)
 - Root token and unseal key saved to `/root/vault-env.sh`
 - XSOAR tokens saved to `/root/xsoar-tokens.txt`
+- TLS certificates in `/etc/vault.d/tls/`
 
 ## Usage
 
@@ -137,8 +139,9 @@ See [credentials.json.example](credentials.json.example) for a complete example.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `VAULT_ADDR` | Vault server address | `http://127.0.0.1:8200` |
+| `VAULT_ADDR` | Vault server address | `https://127.0.0.1:8200` |
 | `VAULT_TOKEN` | Authentication token | (from install) |
+| `VAULT_TLS_ENABLED` | Enable TLS with self-signed certs | `true` |
 | `CREDENTIALS_FILE` | JSON file for initial credentials | (uses demo data) |
 | `DEBUG` | Enable debug output | `0` |
 
@@ -172,12 +175,34 @@ Default categories:
 
 Custom categories can be created via the `add` command or JSON import.
 
+## TLS Configuration
+
+TLS is **enabled by default** with auto-generated self-signed certificates:
+
+```bash
+# Install with TLS (default)
+sudo ./vault-xsoar.sh install
+
+# Install without TLS (not recommended for production)
+sudo VAULT_TLS_ENABLED=false ./vault-xsoar.sh install
+```
+
+Certificate locations:
+- CA certificate: `/etc/vault.d/tls/ca.crt`
+- Server certificate: `/etc/vault.d/tls/vault.crt`
+- Server key: `/etc/vault.d/tls/vault.key`
+
+The CA certificate is automatically added to the system trust store. For XSOAR integration, either:
+- Import the CA certificate as a trusted CA in XSOAR
+- Set "Verify SSL" to false in the XSOAR Vault integration settings
+
 ## Security Notes
 
-- TLS is disabled by default (demo mode) - enable in production
+- TLS is enabled by default with self-signed certificates
 - Unseal key and root token are stored in `/root/` with `600` permissions
 - Never commit `credentials.json` files (added to `.gitignore`)
 - Rotate the root token after initial setup in production
+- For production, consider using certificates from a trusted CA
 
 ## Requirements
 

@@ -73,6 +73,7 @@ Menu structure:
 ```bash
 # Vault Management
 ./vault-xsoar.sh install              # Install and configure Vault
+./vault-xsoar.sh uninstall            # Completely remove Vault and all data
 ./vault-xsoar.sh unseal               # Unseal Vault after restart
 ./vault-xsoar.sh status               # Show Vault status
 ./vault-xsoar.sh test                 # Run integration tests

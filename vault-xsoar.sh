@@ -634,6 +634,73 @@ EOF
 }
 
 #===============================================================================
+# UNINSTALL Command
+#===============================================================================
+cmd_uninstall() {
+    check_root
+    show_mini_logo
+    echo ""
+
+    echo -e "${RED}${BOLD}⚠️  VAULT UNINSTALL${NC}"
+    echo ""
+    echo -e "${WHITE}This will:${NC}"
+    echo -e "  • Stop and disable the Vault service"
+    echo -e "  • Remove Vault package"
+    echo -e "  • Delete all Vault data (${VAULT_DATA_DIR})"
+    echo -e "  • Delete configuration (${VAULT_CONFIG_DIR})"
+    echo -e "  • Delete TLS certificates (${VAULT_TLS_DIR})"
+    echo -e "  • Delete logs (${VAULT_LOG_DIR})"
+    echo -e "  • Remove vault-env.sh and tokens from /root/"
+    echo ""
+    echo -e "${YELLOW}All stored credentials will be permanently deleted!${NC}"
+    echo ""
+
+    read -p "Type 'UNINSTALL' to confirm: " confirm
+    if [[ "${confirm}" != "UNINSTALL" ]]; then
+        log_warn "Uninstall cancelled"
+        exit 0
+    fi
+
+    echo ""
+    log_step "Stopping Vault service..."
+    systemctl stop vault 2>/dev/null || true
+    systemctl disable vault 2>/dev/null || true
+    log_success "Vault service stopped"
+
+    log_step "Removing Vault package..."
+    apt-get remove -y vault > /dev/null 2>&1 || true
+    apt-get autoremove -y > /dev/null 2>&1 || true
+    log_success "Vault package removed"
+
+    log_step "Removing Vault data and configuration..."
+    rm -rf ${VAULT_DATA_DIR}
+    rm -rf ${VAULT_CONFIG_DIR}
+    rm -rf ${VAULT_LOG_DIR}
+    rm -f /etc/systemd/system/vault.service
+    systemctl daemon-reload 2>/dev/null || true
+    log_success "Vault directories removed"
+
+    log_step "Removing credentials and tokens..."
+    rm -f /root/vault-env.sh
+    rm -f /root/vault-init-keys.json
+    rm -f /root/xsoar-tokens.txt
+    log_success "Credentials removed"
+
+    log_step "Removing TLS CA from system trust..."
+    rm -f /usr/local/share/ca-certificates/vault-ca.crt
+    update-ca-certificates > /dev/null 2>&1 || true
+    log_success "TLS CA removed"
+
+    echo ""
+    echo -e "${GREEN}═══════════════════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${WHITE}${BOLD}                    ✔ VAULT UNINSTALLED${NC}"
+    echo -e "${GREEN}═══════════════════════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${WHITE}To reinstall:${NC} sudo $SCRIPT_NAME install"
+    echo ""
+}
+
+#===============================================================================
 # UNSEAL Command
 #===============================================================================
 cmd_unseal() {
@@ -1116,8 +1183,9 @@ cmd_help() {
     echo -e "  ${CYAN}$SCRIPT_NAME${NC} <command> [options]"
     echo ""
     
-    echo -e "${WHITE}${BOLD}INSTALLATION${NC}"
+    echo -e "${WHITE}${BOLD}VAULT MANAGEMENT${NC}"
     echo -e "  ${GREEN}install${NC}              Install and configure Vault for XSOAR"
+    echo -e "  ${GREEN}uninstall${NC}            Completely remove Vault and all data"
     echo -e "  ${GREEN}unseal${NC}               Unseal Vault after restart"
     echo -e "  ${GREEN}status${NC}               Show Vault status and summary"
     echo -e "  ${GREEN}test${NC}                 Run integration tests"
@@ -1307,6 +1375,7 @@ menu_vault_ops() {
             --cursor.foreground 51 \
             "🔓 Unseal Vault" \
             "📦 Install Vault (requires sudo)" \
+            "🗑️  Uninstall Vault (requires sudo)" \
             "⬅️  Back to Main Menu")
 
         case "${choice}" in
@@ -1320,6 +1389,15 @@ menu_vault_ops() {
                     pause_for_key
                 else
                     cmd_install
+                    pause_for_key
+                fi
+                ;;
+            "🗑️  Uninstall Vault (requires sudo)")
+                if [[ $EUID -ne 0 ]]; then
+                    log_error "Uninstall requires sudo. Run: sudo $SCRIPT_NAME menu"
+                    pause_for_key
+                else
+                    cmd_uninstall
                     pause_for_key
                 fi
                 ;;
@@ -1687,6 +1765,7 @@ main() {
             fi
             ;;
         install)     cmd_install "$@" ;;
+        uninstall)   cmd_uninstall "$@" ;;
         unseal)      cmd_unseal "$@" ;;
         status)      cmd_status "$@" ;;
         test)        cmd_test "$@" ;;

@@ -4,3 +4,7 @@
 
 # macOS
 .DS_Store
+
+# Credentials (keep .example, ignore actual credentials)
+credentials.json
+*.credentials.json

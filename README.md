@@ -1,0 +1,190 @@
+# Vault XSOAR
+
+An all-in-one tool for installing, configuring, and managing HashiCorp Vault integrated with Cortex XSOAR for credential management.
+
+## Features
+
+- **One-command Vault installation** on Ubuntu 24.04 LTS
+- **Interactive TUI menu** using [gum](https://github.com/charmbracelet/gum) for arrow-key navigation
+- **Credential management**: list, get, add, rotate, delete
+- **Bulk import** credentials from JSON files
+- **XSOAR integration** with pre-configured policies and tokens
+- **Password generation** with complexity requirements
+
+## Quick Start
+
+```bash
+# Install Vault with demo credentials
+sudo ./vault-xsoar.sh install
+
+# Or install with your own credentials
+sudo CREDENTIALS_FILE=./my-credentials.json ./vault-xsoar.sh install
+
+# Launch interactive menu
+./vault-xsoar.sh
+
+# Or use CLI commands directly
+./vault-xsoar.sh list
+./vault-xsoar.sh get active-directory/svc_xsoar
+```
+
+## Installation
+
+### Prerequisites
+
+- Ubuntu 24.04 LTS (or compatible)
+- Root/sudo access for installation
+- `curl`, `jq` (installed automatically)
+
+### Install Vault
+
+```bash
+# Clone or download the script
+chmod +x vault-xsoar.sh
+
+# Run installation (creates demo credentials by default)
+sudo ./vault-xsoar.sh install
+```
+
+After installation:
+- Vault UI: http://127.0.0.1:8200/ui
+- Root token and unseal key saved to `/root/vault-env.sh`
+- XSOAR tokens saved to `/root/xsoar-tokens.txt`
+
+## Usage
+
+### Interactive Mode
+
+Run without arguments to launch the interactive menu (requires `gum`):
+
+```bash
+./vault-xsoar.sh
+```
+
+Menu structure:
+- **Status & Info**: Vault status, run tests, XSOAR integration info
+- **Credential Management**: Browse, get, add, rotate, delete credentials
+- **Vault Operations**: Unseal, install
+
+### CLI Commands
+
+```bash
+# Vault Management
+./vault-xsoar.sh install              # Install and configure Vault
+./vault-xsoar.sh unseal               # Unseal Vault after restart
+./vault-xsoar.sh status               # Show Vault status
+./vault-xsoar.sh test                 # Run integration tests
+
+# Credential Management
+./vault-xsoar.sh list                 # List all credential categories
+./vault-xsoar.sh list active-directory # List credentials in category
+./vault-xsoar.sh get <path>           # Get credential details
+./vault-xsoar.sh get <path> json      # Get as JSON
+./vault-xsoar.sh add <path>           # Add credential (interactive)
+./vault-xsoar.sh add <path> <u> <p>   # Add credential with values
+./vault-xsoar.sh rotate <path>        # Rotate password
+./vault-xsoar.sh rotate <path> 24     # Rotate with 24-char password
+./vault-xsoar.sh delete <path>        # Delete credential
+./vault-xsoar.sh import <file>        # Import from JSON file
+
+# Info
+./vault-xsoar.sh xsoar-info           # Show XSOAR integration details
+./vault-xsoar.sh help                 # Show help
+./vault-xsoar.sh version              # Show version
+```
+
+### Importing Credentials
+
+Create a JSON file with your credentials:
+
+```json
+{
+  "credentials": [
+    {
+      "path": "active-directory/svc_account",
+      "data": {
+        "username": "svc_user",
+        "password": "SecureP@ss123!",
+        "domain": "corp.local",
+        "description": "Service Account"
+      }
+    },
+    {
+      "path": "api-keys/my-api",
+      "data": {
+        "api_key": "key-12345",
+        "api_secret": "secret-67890",
+        "endpoint": "https://api.example.com"
+      }
+    }
+  ]
+}
+```
+
+Import during installation or after:
+
+```bash
+# During installation
+sudo CREDENTIALS_FILE=./credentials.json ./vault-xsoar.sh install
+
+# After installation
+./vault-xsoar.sh import credentials.json
+```
+
+See [credentials.json.example](credentials.json.example) for a complete example.
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `VAULT_ADDR` | Vault server address | `http://127.0.0.1:8200` |
+| `VAULT_TOKEN` | Authentication token | (from install) |
+| `CREDENTIALS_FILE` | JSON file for initial credentials | (uses demo data) |
+| `DEBUG` | Enable debug output | `0` |
+
+## XSOAR Integration
+
+After installation, two tokens are created:
+
+- **Read-Only Token**: For fetching credentials (`xsoar-credentials` policy)
+- **Rotation Token**: For credential management (`xsoar-rotation` policy)
+
+View integration details:
+
+```bash
+./vault-xsoar.sh xsoar-info
+```
+
+XSOAR commands:
+```
+!hashicorp-list-secrets
+!hashicorp-get-secret path=active-directory/svc_xsoar
+!hashicorp-list-secrets path=active-directory
+```
+
+## Credential Categories
+
+Default categories:
+- `active-directory/` - AD service accounts
+- `api-keys/` - API keys and secrets
+- `database/` - Database credentials
+- `email/` - SMTP and email accounts
+
+Custom categories can be created via the `add` command or JSON import.
+
+## Security Notes
+
+- TLS is disabled by default (demo mode) - enable in production
+- Unseal key and root token are stored in `/root/` with `600` permissions
+- Never commit `credentials.json` files (added to `.gitignore`)
+- Rotate the root token after initial setup in production
+
+## Requirements
+
+- **OS**: Ubuntu 24.04 LTS
+- **Dependencies**: `curl`, `jq`, `gnupg` (installed automatically)
+- **Optional**: `gum` for interactive menu (can be installed via the script)
+
+## License
+
+MIT

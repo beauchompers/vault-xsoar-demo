@@ -103,20 +103,17 @@ Create a JSON file with your credentials:
 {
   "credentials": [
     {
-      "path": "svc_account",
+      "path": "svc_xsoar",
       "data": {
-        "username": "svc_user",
-        "password": "SecureP@ss123!",
-        "domain": "corp.local",
-        "description": "Service Account"
+        "username": "svc_xsoar",
+        "password": "SecureP@ss123!"
       }
     },
     {
-      "path": "my_api",
+      "path": "svc_engine",
       "data": {
-        "api_key": "key-12345",
-        "api_secret": "secret-67890",
-        "endpoint": "https://api.example.com"
+        "username": "svc_engine",
+        "password": "EngineP@ss456!"
       }
     }
   ]

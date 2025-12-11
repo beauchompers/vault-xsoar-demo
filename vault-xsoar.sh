@@ -154,16 +154,11 @@ load_credentials_from_file() {
     local count=$(jq '.credentials | length' "${file}")
     log_step "Loading ${count} credentials from file..."
 
-    local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
     for i in $(seq 0 $((count - 1))); do
         local path=$(jq -r ".credentials[$i].path" "${file}")
         local data=$(jq -c ".credentials[$i].data" "${file}")
 
-        # Add timestamp to the data
-        data=$(echo "${data}" | jq --arg ts "${timestamp}" '. + {last_rotated: $ts}')
-
-        # Convert JSON to vault kv put arguments
+        # Load credential data as-is (username:password format)
         echo "${data}" | vault kv put "${CREDENTIALS_PATH}/${path}" - > /dev/null
 
         log_debug "  Loaded: ${path}"
@@ -496,8 +491,8 @@ EOF
 
     # Configure secrets engine
     log_step "Configuring secrets engine..."
-    vault secrets enable -path=${CREDENTIALS_PATH} -version=2 kv 2>/dev/null || true
-    log_success "KV v2 secrets engine enabled at '${CREDENTIALS_PATH}/'"
+    vault secrets enable -path=${CREDENTIALS_PATH} -version=1 kv 2>/dev/null || true
+    log_success "KV v1 secrets engine enabled at '${CREDENTIALS_PATH}/'"
 
     # Load credentials from file or create demo credentials
     if [[ -n "${CREDENTIALS_FILE}" ]]; then
@@ -510,8 +505,7 @@ EOF
     log_step "Creating XSOAR access policies..."
     
     cat > /tmp/xsoar-policy.hcl << 'POLICY'
-path "credentials/data/*" { capabilities = ["read", "list"] }
-path "credentials/metadata/*" { capabilities = ["read", "list"] }
+path "credentials/*" { capabilities = ["read", "list"] }
 path "sys/mounts" { capabilities = ["read"] }
 path "auth/token/renew-self" { capabilities = ["update"] }
 path "auth/token/lookup-self" { capabilities = ["read"] }
@@ -519,8 +513,7 @@ POLICY
     vault policy write xsoar-credentials /tmp/xsoar-policy.hcl > /dev/null
 
     cat > /tmp/xsoar-rotate-policy.hcl << 'POLICY'
-path "credentials/data/*" { capabilities = ["create", "read", "update", "delete"] }
-path "credentials/metadata/*" { capabilities = ["read", "list", "delete"] }
+path "credentials/*" { capabilities = ["create", "read", "update", "list", "delete"] }
 path "sys/mounts" { capabilities = ["read"] }
 path "auth/token/renew-self" { capabilities = ["update"] }
 path "auth/token/lookup-self" { capabilities = ["read"] }
@@ -814,69 +807,46 @@ cmd_get() {
 cmd_add() {
     load_vault_env
     check_vault_ready || exit 1
-    
+
     local path=$1
     local username=$2
     local password=$3
-    
+
     show_mini_logo
     echo ""
-    
+
     if [[ -z "${path}" ]]; then
-        log_error "Usage: $SCRIPT_NAME add <path> [username] [password]"
+        log_error "Usage: $SCRIPT_NAME add <path> <username> <password>"
         echo ""
         echo "  Examples:"
-        echo "    $SCRIPT_NAME add active-directory/new-svc myuser mypass"
-        echo "    $SCRIPT_NAME add api-keys/newapi  # Interactive mode"
+        echo "    $SCRIPT_NAME add svc_xsoar svc_xsoar SecureP@ss123"
+        echo "    $SCRIPT_NAME add svc_engine svc_engine EngineP@ss456"
         exit 1
     fi
-    
+
     local full_path="${CREDENTIALS_PATH}/${path}"
-    
+
     # Interactive mode if username not provided
     if [[ -z "${username}" ]]; then
         echo -e "${WHITE}${BOLD}➕ Add New Credential: ${CYAN}${path}${NC}"
         echo -e "${GRAY}─────────────────────────────────────────${NC}"
-        
+
         read -p "  Username: " username
         read -sp "  Password (blank to generate): " password
         echo ""
-        
+
         if [[ -z "${password}" ]]; then
             password=$(generate_password 20)
             echo -e "  ${GREEN}Generated:${NC} ${YELLOW}${password}${NC}"
         fi
-        
-        read -p "  Description: " description
-        
-        local extra_fields=""
-        while true; do
-            read -p "  Add field (name=value, blank to finish): " field
-            [[ -z "${field}" ]] && break
-            extra_fields="${extra_fields} ${field}"
-        done
     fi
-    
-    local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    
+
     log_step "Creating credential..."
-    
-    if [[ -n "${description}" ]]; then
-        vault kv put ${full_path} \
-            username="${username}" \
-            password="${password}" \
-            description="${description}" \
-            created_at="${timestamp}" \
-            last_rotated="${timestamp}" \
-            ${extra_fields} > /dev/null
-    else
-        vault kv put ${full_path} \
-            username="${username}" \
-            password="${password}" \
-            created_at="${timestamp}" \
-            last_rotated="${timestamp}" > /dev/null
-    fi
-    
+
+    # Store as username:password (key:value)
+    vault kv put ${full_path} \
+        "${username}"="${password}" > /dev/null
+
     log_success "Credential created: ${path}"
     echo ""
 }
@@ -887,61 +857,47 @@ cmd_add() {
 cmd_rotate() {
     load_vault_env
     check_vault_ready || exit 1
-    
+
     local path=$1
     local length=${2:-20}
-    
+
     if [[ -z "${path}" ]]; then
         log_error "Usage: $SCRIPT_NAME rotate <path> [password_length]"
-        echo "  Example: $SCRIPT_NAME rotate active-directory/svc_xsoar 24"
+        echo "  Example: $SCRIPT_NAME rotate svc_xsoar 24"
         exit 1
     fi
-    
+
     show_mini_logo
     echo ""
-    
+
     local full_path="${CREDENTIALS_PATH}/${path}"
-    local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    
+
     echo -e "${WHITE}${BOLD}🔄 Rotating Credential: ${CYAN}${path}${NC}"
     echo -e "${GRAY}─────────────────────────────────────────${NC}"
-    
-    # Get current
+
+    # Get current credential
     log_step "Fetching current credential..."
     local current=$(vault kv get -format=json ${full_path} 2>/dev/null)
-    
+
     if [[ -z "${current}" ]]; then
         log_error "Credential not found: ${path}"
         exit 1
     fi
-    
+
+    # Get the username (first key in data)
     local current_data=$(echo "${current}" | jq '.data')
-    local current_password=$(echo "${current_data}" | jq -r '.password')
-    local username=$(echo "${current_data}" | jq -r '.username // "unknown"')
-    local prev_rotation=$(echo "${current_data}" | jq -r '.last_rotated // "never"')
-    
+    local username=$(echo "${current_data}" | jq -r 'keys[0]')
+
     echo -e "  ${WHITE}Username:${NC}          ${username}"
-    echo -e "  ${WHITE}Last Rotation:${NC}     ${prev_rotation}"
-    
+
     # Generate new password
     log_step "Generating new password..."
     local new_password=$(generate_password ${length})
-    
-    # Update
-    local updated_data=$(echo "${current_data}" | jq \
-        --arg new_pwd "${new_password}" \
-        --arg old_pwd "${current_password}" \
-        --arg ts "${timestamp}" \
-        --arg prev_ts "${prev_rotation}" \
-        '.password = $new_pwd | 
-         .previous_password = $old_pwd |
-         .last_rotated = $ts |
-         .previous_rotation = $prev_ts |
-         .rotation_count = ((.rotation_count // 0) + 1)')
-    
+
+    # Update with simple username:password format
     log_step "Updating credential in Vault..."
-    echo "${updated_data}" | vault kv put ${full_path} - > /dev/null
-    
+    vault kv put ${full_path} "${username}"="${new_password}" > /dev/null
+
     echo ""
     log_success "Credential rotated successfully!"
     echo ""
@@ -951,16 +907,6 @@ cmd_rotate() {
     echo ""
     echo -e "${GRAY}⚠ Remember to update the target system with the new password!${NC}"
     echo ""
-    
-    # Output JSON for XSOAR if requested
-    if [[ "${3}" == "--json" ]]; then
-        jq -n \
-            --arg path "${path}" \
-            --arg username "${username}" \
-            --arg password "${new_password}" \
-            --arg timestamp "${timestamp}" \
-            '{success: true, path: $path, username: $username, new_password: $password, rotated_at: $timestamp}'
-    fi
 }
 
 #===============================================================================
@@ -1471,7 +1417,7 @@ interactive_add() {
     echo ""
 
     local name=$(gum input \
-        --header "Credential name:" \
+        --header "Credential name (path):" \
         --placeholder "e.g., svc_xsoar")
     [[ -z "${name}" ]] && return
 
@@ -1509,10 +1455,6 @@ interactive_add() {
     fi
     [[ -z "${password}" ]] && return
 
-    local description=$(gum input \
-        --header "Description (optional):" \
-        --placeholder "What is this credential for?")
-
     echo ""
     gum style \
         --border rounded \
@@ -1520,20 +1462,13 @@ interactive_add() {
         --padding "1 2" \
         "Name: ${name}
 Username: ${username}
-Password: [set]
-Description: ${description:-N/A}"
+Password: [set]"
 
     echo ""
     if gum confirm "Create this credential?"; then
-        local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
         gum spin --spinner dot --title "Creating credential..." -- \
             vault kv put ${CREDENTIALS_PATH}/${name} \
-                username="${username}" \
-                password="${password}" \
-                description="${description}" \
-                created_at="${timestamp}" \
-                last_rotated="${timestamp}"
+                "${username}"="${password}"
 
         log_success "Credential created: ${name}"
     else
@@ -1572,8 +1507,8 @@ interactive_rotate() {
     [[ -z "${selected}" ]] && return
 
     local current=$(vault kv get -format=json ${CREDENTIALS_PATH}/${selected} 2>/dev/null)
-    local username=$(echo "${current}" | jq -r '.data.username // "N/A"')
-    local last_rotated=$(echo "${current}" | jq -r '.data.last_rotated // "Never"')
+    local current_data=$(echo "${current}" | jq '.data')
+    local username=$(echo "${current_data}" | jq -r 'keys[0]')
 
     echo ""
     gum style \
@@ -1581,8 +1516,7 @@ interactive_rotate() {
         --border-foreground 214 \
         --padding "1 2" \
         "Credential: ${selected}
-Username: ${username}
-Last Rotated: ${last_rotated}"
+Username: ${username}"
 
     echo ""
 

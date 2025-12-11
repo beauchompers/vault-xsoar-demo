@@ -177,12 +177,10 @@ create_demo_credentials() {
     log_step "Creating demo credentials..."
 
     vault kv put ${CREDENTIALS_PATH}/svc_xsoar \
-        username="svc_xsoar" \
-        password="DemoP@ssw0rd123!" > /dev/null
+        svc_xsoar="DemoP@ssw0rd123!" > /dev/null
 
     vault kv put ${CREDENTIALS_PATH}/svc_engine \
-        username="svc_engine" \
-        password="EngineP@ss456!" > /dev/null
+        svc_engine="EngineP@ss456!" > /dev/null
 
     log_success "Demo credentials created"
 }

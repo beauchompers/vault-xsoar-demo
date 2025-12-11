@@ -105,15 +105,13 @@ Create a JSON file with your credentials:
     {
       "path": "svc_xsoar",
       "data": {
-        "username": "svc_xsoar",
-        "password": "SecureP@ss123!"
+        "svc_xsoar": "SecureP@ss123!"
       }
     },
     {
       "path": "svc_engine",
       "data": {
-        "username": "svc_engine",
-        "password": "EngineP@ss456!"
+        "svc_engine": "EngineP@ss456!"
       }
     }
   ]

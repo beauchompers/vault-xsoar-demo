@@ -498,8 +498,8 @@ EOF
 
     # Configure secrets engine
     log_step "Configuring secrets engine..."
-    vault secrets enable -path=${CREDENTIALS_PATH} -version=1 kv 2>/dev/null || true
-    log_success "KV secrets engine enabled at '${CREDENTIALS_PATH}/'"
+    vault secrets enable -path=${CREDENTIALS_PATH} -version=2 kv 2>/dev/null || true
+    log_success "KV v2 secrets engine enabled at '${CREDENTIALS_PATH}/'"
 
     # Load credentials from file or create demo credentials
     if [[ -n "${CREDENTIALS_FILE}" ]]; then
@@ -512,15 +512,17 @@ EOF
     log_step "Creating XSOAR access policies..."
     
     cat > /tmp/xsoar-policy.hcl << 'POLICY'
-path "credentials/*" { capabilities = ["read", "list"] }
+path "credentials/data/*" { capabilities = ["read", "list"] }
+path "credentials/metadata/*" { capabilities = ["read", "list"] }
 path "sys/mounts" { capabilities = ["read"] }
 path "auth/token/renew-self" { capabilities = ["update"] }
 path "auth/token/lookup-self" { capabilities = ["read"] }
 POLICY
     vault policy write xsoar-credentials /tmp/xsoar-policy.hcl > /dev/null
-    
+
     cat > /tmp/xsoar-rotate-policy.hcl << 'POLICY'
-path "credentials/*" { capabilities = ["create", "read", "update", "list", "delete"] }
+path "credentials/data/*" { capabilities = ["create", "read", "update", "delete"] }
+path "credentials/metadata/*" { capabilities = ["read", "list", "delete"] }
 path "sys/mounts" { capabilities = ["read"] }
 path "auth/token/renew-self" { capabilities = ["update"] }
 path "auth/token/lookup-self" { capabilities = ["read"] }
